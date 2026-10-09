@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>نظام الحضور والانصراف</title>
+<style>
+:root{--bg:#f4f6fa;--card:#fff;--tx:#1b2430;--mut:#6b7686;--pri:#2563eb;--ok:#16a34a;--bad:#dc2626;--bd:#e3e8ef}
+@media(prefers-color-scheme:dark){:root{--bg:#0f141b;--card:#1a212b;--tx:#e8edf3;--mut:#93a0b1;--bd:#2a3340}}
+*{box-sizing:border-box}:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;font-family:system-ui,Tahoma,Arial,sans-serif;background:var(--bg);color:var(--tx)}
+.wrap{max-width:900px;margin:auto;padding:14px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:16px;margin-bottom:14px}
+h2,h3{margin:0 0 12px}input,select{width:100%;padding:10px;margin:4px 0 10px;border:1px solid var(--bd);border-radius:8px;background:var(--bg);color:var(--tx);font-size:15px}
+label{font-size:13px;color:var(--mut)}
+button{padding:10px 16px;border:0;border-radius:10px;background:var(--pri);color:#fff;font-size:15px;cursor:pointer}
+button.g{background:var(--ok)}button.r{background:var(--bad)}button.s{background:var(--mut)}
+.big{width:100%;padding:22px;font-size:20px;margin-bottom:10px}.big:disabled{opacity:.4}
+.row{display:flex;gap:10px;flex-wrap:wrap}.row>*{flex:1;min-width:140px}
+.tabs{display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap}.tabs button{background:var(--card);color:var(--tx);border:1px solid var(--bd)}.tabs button.on{background:var(--pri);color:#fff}
+.tw{overflow-x:auto}table{width:100%;border-collapse:collapse;font-size:14px;white-space:nowrap}th,td{padding:8px;border-bottom:1px solid var(--bd);text-align:right}
+.top{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}
+.msg{padding:10px;border-radius:8px;margin:8px 0;background:var(--bg)}.hide{display:none}
+.stat{font-size:26px;font-weight:700}.days label{display:inline-flex;gap:3px;margin-left:10px;align-items:center}.days input{width:auto;margin:0}
+</style>
+</head>
+<body>
+<div class="wrap" id="app"></div>
+
+<script type="module">
+import {initializeApp} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import {getAuth,signInWithEmailAndPassword,createUserWithEmailAndPassword,signOut,onAuthStateChanged} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import {getFirestore,doc,getDoc,setDoc,getDocs,collection,query,where,deleteDoc} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+/* ====== ضع إعدادات مشروع Firebase هنا ====== */
+const firebaseConfig={apiKey:"AIzaSyAMQz6Kh3s1imoL89S8h7xqFlG6d9chHUo",authDomain:"sellary-c5285.firebaseapp.com",projectId:"sellary-c5285",storageBucket:"sellary-c5285.firebasestorage.app",messagingSenderId:"158176823054",appId:"1:158176823054:web:1c4e599f6ccbea2580795f"};
+/* =========================================== */
+
+const app=initializeApp(firebaseConfig),auth=getAuth(app),db=getFirestore(app);
+const $=s=>document.querySelector(s),A=$("#app");
+const DAYS=["الأحد","الاثنين","الثلاثاء","الأربعاء","الخميس","الجمعة","السبت"];
+let me=null,cfg={lat:0,lng:0,radius:150,ot:1.5,ded:1,absent:1};
+const dk=d=>{d=new Date(d);return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0")};
+const tm=t=>t?new Date(t).toLocaleTimeString("ar-EG",{hour:"2-digit",minute:"2-digit"}):"-";
+const f2=n=>(Math.round(n*100)/100).toLocaleString("en");
+const dist=(a,b,c,d)=>{const R=6371000,r=x=>x*Math.PI/180,dl=r(c-a),dn=r(d-b);const h=Math.sin(dl/2)**2+Math.cos(r(a))*Math.cos(r(c))*Math.sin(dn/2)**2;return 2*R*Math.asin(Math.sqrt(h))};
+const pos=()=>new Promise((ok,no)=>navigator.geolocation?navigator.geolocation.getCurrentPosition(ok,no,{enableHighAccuracy:true,timeout:15000}):no(new Error("المتصفح لا يدعم تحديد الموقع")));
+
+onAuthStateChanged(auth,async u=>{
+  if(!u){me=null;return loginView()}
+  const s=await getDoc(doc(db,"users",u.uid));
+  if(!s.exists()){return loginView("الحساب غير مسجل كموظف")}
+  me={uid:u.uid,...s.data()};
+  const c=await getDoc(doc(db,"settings","work"));if(c.exists())cfg={...cfg,...c.data()};
+  me.role==="admin"?adminView():empView();
+});
+
+async function loginView(err=""){
+  let first=location.hash==="#setup";
+  try{first=first||(await getDocs(collection(db,"users"))).empty}catch(e){}
+  A.innerHTML=`<div class="card"><h2>تسجيل الدخول</h2><label>البريد</label><input id="em" type="email"><label>كلمة المرور</label><input id="pw" type="password">
+  <button id="go" style="width:100%">دخول</button><div class="msg ${err?"":"hide"}" id="er">${err}</div>
+  ${first?`<hr><p>لا يوجد مستخدمون بعد.</p><label>اسم المدير</label><input id="nm"><button class="g" id="reg" style="width:100%">إنشاء حساب المدير الأول</button>`:""}</div>`;
+  const er=m=>{$("#er").textContent=m;$("#er").classList.remove("hide")};
+  $("#go").onclick=()=>signInWithEmailAndPassword(auth,$("#em").value,$("#pw").value).catch(()=>er("بيانات الدخول غير صحيحة"));
+  if(first)$("#reg").onclick=async()=>{try{
+    const r=await createUserWithEmailAndPassword(auth,$("#em").value,$("#pw").value);
+    await setDoc(doc(db,"users",r.user.uid),{name:$("#nm").value||"المدير",email:$("#em").value,role:"admin"});location.reload()}catch(e){er(e.message)}};
+}
+
+const head=t=>`<div class="top"><h2>${t} — ${me.name}</h2><button class="s" id="out">خروج</button></div>`;
+const bindOut=()=>$("#out").onclick=()=>signOut(auth);
+
+/* ================= الموظف ================= */
+async function empView(){
+  A.innerHTML=head("الحضور")+`<div class="card"><div id="st" class="msg"></div>
+  <button class="big g" id="in">🟢 حضور (صباحاً)</button><button class="big r" id="ou">🔴 انصراف (مغادرة)</button><div id="m" class="msg hide"></div></div>
+  <div class="card"><h3>هذا الأسبوع</h3><div class="stat" id="wk">-</div></div>
+  <div class="card"><h3>سجل الشهر</h3><div class="tw"><table id="tb"></table></div></div>`;
+  bindOut();
+  const msg=(t,bad)=>{const m=$("#m");m.textContent=t;m.style.color=bad?"var(--bad)":"var(--ok)";m.classList.remove("hide")};
+  const today=()=>doc(db,"attendance",me.uid+"_"+dk(Date.now()));
+  async function refresh(){
+    const s=await getDoc(today()),d=s.exists()?s.data():null;
+    $("#st").textContent=!d?"لم تسجل حضور اليوم":d.out?`حضور ${tm(d.in)} — انصراف ${tm(d.out)}`:`حضور منذ ${tm(d.in)}`;
+    $("#in").disabled=!!d;$("#ou").disabled=!d||!!d.out;
+    const now=new Date(),m0=dk(new Date(now.getFullYear(),now.getMonth(),1));
+    const q=await getDocs(query(collection(db,"attendance"),where("uid","==",me.uid),where("date",">=",m0)));
+    const rows=q.docs.map(x=>x.data()).sort((a,b)=>b.date.localeCompare(a.date));
+    const ws=new Date(now);ws.setDate(now.getDate()-((now.getDay()+1)%7));const wk=dk(ws);
+    let h=0;rows.forEach(r=>{if(r.date>=wk&&r.out)h+=(r.out-r.in)/36e5});
+    $("#wk").textContent=f2(h)+" ساعة";
+    $("#tb").innerHTML="<tr><th>التاريخ</th><th>حضور</th><th>انصراف</th><th>ساعات</th></tr>"+rows.map(r=>`<tr><td>${r.date}</td><td>${tm(r.in)}</td><td>${tm(r.out)}</td><td>${r.out?f2((r.out-r.in)/36e5):"-"}</td></tr>`).join("");
+  }
+  async function act(type){
+    msg("جاري تحديد موقعك...");
+    try{
+      const p=await pos(),d=dist(p.coords.latitude,p.coords.longitude,cfg.lat,cfg.lng);
+      if(d>cfg.radius)return msg(`أنت بعيد عن مقر العمل (${Math.round(d)} م). المسموح ${cfg.radius} م`,true);
+      const ref=today(),s=await getDoc(ref),loc={lat:p.coords.latitude,lng:p.coords.longitude};
+      if(type==="in")await setDoc(ref,{uid:me.uid,date:dk(Date.now()),in:Date.now(),inLoc:loc});
+      else await setDoc(ref,{...s.data(),out:Date.now(),outLoc:loc});
+      msg("تم التسجيل ✔");refresh();
+    }catch(e){msg("تعذر تحديد الموقع: فعّل GPS وأذن للمتصفح",true)}
+  }
+  $("#in").onclick=()=>act("in");$("#ou").onclick=()=>act("out");refresh();
+}
+
+/* ================= المدير ================= */
+function adminView(){
+  A.innerHTML=head("لوحة المدير")+`<div class="tabs"><button data-t="rp" class="on">التقارير والرواتب</button><button data-t="em">الموظفون</button><button data-t="cf">الإعدادات</button></div><div id="pg"></div>`;
+  bindOut();
+  const tabs=document.querySelectorAll(".tabs button"),go=t=>{tabs.forEach(b=>b.classList.toggle("on",b.dataset.t===t));({rp:report,em:employees,cf:settings})[t]()};
+  tabs.forEach(b=>b.onclick=()=>go(b.dataset.t));go("rp");
+}
+
+async function report(){
+  const n=new Date(),mv=n.getFullYear()+"-"+String(n.getMonth()+1).padStart(2,"0");
+  $("#pg").innerHTML=`<div class="card"><label>الشهر</label><input type="month" id="mo" value="${mv}"><button id="run">عرض</button></div><div class="card"><div class="tw"><table id="rt"></table></div></div>`;
+  async function run(){
+    const [y,m]=$("#mo").value.split("-").map(Number),a=dk(new Date(y,m-1,1)),b=dk(new Date(y,m,0));
+    const us=(await getDocs(collection(db,"users"))).docs.map(x=>({id:x.id,...x.data()})).filter(u=>u.role==="employee");
+    const at=(await getDocs(query(collection(db,"attendance"),where("date",">=",a),where("date","<=",b)))).docs.map(x=>x.data());
+    const last=Math.min(new Date(y,m,0).getDate(),(y===n.getFullYear()&&m===n.getMonth()+1)?n.getDate()-1:99);
+    let h="<tr><th>الموظف</th><th>أيام حضور</th><th>غياب</th><th>ساعات</th><th>إضافي</th><th>نقص</th><th>الأساسي</th><th>+إضافي</th><th>-خصم</th><th>الصافي</th></tr>";
+    us.forEach(u=>{
+      const wd=u.workDays||[0,1,2,3,4],dh=+u.dailyHours||8,sal=+u.salary||0;
+      const rate=sal/(wd.length*dh*4.33),mine=at.filter(r=>r.uid===u.id&&r.out);
+      let tot=0,ot=0,sh=0;mine.forEach(r=>{const x=(r.out-r.in)/36e5;tot+=x;x>dh?ot+=x-dh:sh+=dh-x});
+      const have=new Set(at.filter(r=>r.uid===u.id).map(r=>r.date));let ab=0;
+      for(let d=1;d<=last;d++){const dt=new Date(y,m-1,d);if(wd.includes(dt.getDay())&&!have.has(dk(dt)))ab++}
+      const add=ot*rate*cfg.ot,ded=sh*rate*cfg.ded+ab*dh*rate*cfg.absent,net=sal+add-ded;
+      h+=`<tr><td>${u.name}</td><td>${mine.length}</td><td>${ab}</td><td>${f2(tot)}</td><td>${f2(ot)}</td><td>${f2(sh)}</td><td>${f2(sal)}</td><td>${f2(add)}</td><td>${f2(ded)}</td><td><b>${f2(Math.max(net,0))}</b></td></tr>`;
+    });
+    $("#rt").innerHTML=h;
+  }
+  $("#run").onclick=run;run();
+}
+
+async function employees(){
+  $("#pg").innerHTML=`<div class="card"><h3>إضافة موظف</h3><div class="row"><div><label>الاسم</label><input id="n"></div><div><label>البريد</label><input id="e" type="email"></div><div><label>كلمة المرور (6+)</label><input id="p" type="text"></div></div>
+  <div class="row"><div><label>الراتب الشهري</label><input id="s" type="number"></div><div><label>ساعات العمل يومياً</label><input id="h" type="number" value="8"></div></div>
+  <label>أيام العمل</label><div class="days" id="d">${DAYS.map((x,i)=>`<label><input type="checkbox" value="${i}" ${i<5?"checked":""}>${x}</label>`).join("")}</div><br>
+  <button class="g" id="add">إضافة</button><div class="msg hide" id="m"></div></div>
+  <div class="card"><div class="tw"><table id="t"></table></div></div>`;
+  const list=async()=>{
+    const us=(await getDocs(collection(db,"users"))).docs.map(x=>({id:x.id,...x.data()})).filter(u=>u.role==="employee");
+    $("#t").innerHTML="<tr><th>الاسم</th><th>البريد</th><th>الراتب</th><th>ساعات/يوم</th><th>أيام</th><th></th></tr>"+us.map(u=>`<tr><td>${u.name}</td><td>${u.email}</td><td>${u.salary}</td><td>${u.dailyHours}</td><td>${(u.workDays||[]).length}</td><td><button class="r" data-id="${u.id}">حذف</button></td></tr>`).join("");
+    document.querySelectorAll("#t .r").forEach(b=>b.onclick=async()=>{if(confirm("حذف الموظف من النظام؟")){await deleteDoc(doc(db,"users",b.dataset.id));list()}});
+  };
+  $("#add").onclick=async()=>{
+    const m=$("#m");m.classList.remove("hide");m.textContent="جاري الإضافة...";
+    try{
+      const sec=initializeApp(firebaseConfig,"sec"+Date.now()),r=await createUserWithEmailAndPassword(getAuth(sec),$("#e").value,$("#p").value);
+      await setDoc(doc(db,"users",r.user.uid),{name:$("#n").value,email:$("#e").value,role:"employee",salary:+$("#s").value,dailyHours:+$("#h").value,workDays:[...document.querySelectorAll("#d input:checked")].map(x=>+x.value)});
+      m.textContent="تمت الإضافة ✔";list();
+    }catch(e){m.textContent="خطأ: "+e.message}
+  };
+  list();
+}
+
+function settings(){
+  $("#pg").innerHTML=`<div class="card"><h3>موقع العمل</h3><button id="loc" class="s">استخدم موقعي الحالي</button><div class="row"><div><label>خط العرض</label><input id="la" value="${cfg.lat}"></div><div><label>خط الطول</label><input id="ln" value="${cfg.lng}"></div><div><label>النطاق المسموح (متر)</label><input id="ra" type="number" value="${cfg.radius}"></div></div>
+  <h3>قواعد الحساب</h3><div class="row"><div><label>معامل الإضافي (1.5 = ساعة ونصف)</label><input id="ot" type="number" step="0.1" value="${cfg.ot}"></div><div><label>معامل خصم النقص في الساعات</label><input id="de" type="number" step="0.1" value="${cfg.ded}"></div><div><label>معامل خصم يوم الغياب</label><input id="ab" type="number" step="0.1" value="${cfg.absent}"></div></div>
+  <button class="g" id="sv">حفظ</button><div class="msg hide" id="m"></div></div>`;
+  $("#loc").onclick=async()=>{try{const p=await pos();$("#la").value=p.coords.latitude;$("#ln").value=p.coords.longitude}catch(e){alert("تعذر تحديد الموقع")}};
+  $("#sv").onclick=async()=>{
+    cfg={lat:+$("#la").value,lng:+$("#ln").value,radius:+$("#ra").value,ot:+$("#ot").value,ded:+$("#de").value,absent:+$("#ab").value};
+    await setDoc(doc(db,"settings","work"),cfg);$("#m").textContent="تم الحفظ ✔";$("#m").classList.remove("hide");
+  };
+}
+</script>
+</body>
+</html>

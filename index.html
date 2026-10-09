@@ -54,37 +54,35 @@ async function start(u){
   let s=await getDoc(doc(db,"users",u.uid));
   if(!s.exists()){
     const em=(u.email||"").toLowerCase();
-    try{
-      const iv=await getDoc(doc(db,"invites",em));
-      if(iv.exists())await setDoc(doc(db,"users",u.uid),{...iv.data(),email:em,role:"employee"});
-      else if(location.hash==="#setup")await setDoc(doc(db,"users",u.uid),{name:u.displayName||em,email:em,role:"admin"});
-    }catch(e){window._le=e.message}
+    try{const iv=await getDoc(doc(db,"invites",em));if(iv.exists())await setDoc(doc(db,"users",u.uid),{...iv.data(),email:em,role:"employee"})}catch(e){}
     s=await getDoc(doc(db,"users",u.uid));
+    if(!s.exists()){try{await setDoc(doc(db,"users",u.uid),{name:window._nm||u.displayName||em,email:em,role:"pending"});s=await getDoc(doc(db,"users",u.uid))}catch(e){window._le=e.message}}
     if(!s.exists())return noAccount(u);
   }
   me={uid:u.uid,...s.data()};
+  if(me.role==="pending"||me.role==="rejected")return waitView(me.role==="rejected");
   const c=await getDoc(doc(db,"settings","work"));if(c.exists())cfg={...cfg,...c.data()};
   me.role==="admin"?adminView():empView();
 }
 function showErr(e){A.innerHTML=`<div class="card"><h3>حدث خطأ</h3><div class="msg" dir="ltr">${e.message||e}</div><button class="s" id="o2">خروج</button></div>`;$("#o2").onclick=()=>signOut(auth)}
 function noAccount(u){
-  A.innerHTML=`<div class="card"><h2>الحساب غير مسجل</h2><p dir="ltr">${u.email}</p><p>اطلب من المدير إضافة هذا البريد بالضبط في تبويب الموظفون. وإذا كنت صاحب النظام وهذا أول إعداد، سجّل نفسك مديراً.</p><button class="g" id="ad" style="width:100%">تسجيل هذا الحساب كمدير (للإعداد الأول فقط)</button><button class="s" id="lo" style="width:100%;margin-top:8px">خروج</button><div class="msg ${window._le?"":"hide"}" id="er" dir="ltr">${window._le||""}</div></div>`;
+  A.innerHTML=`<div class="card"><h2>تعذر إنشاء طلبك</h2><p dir="ltr">${u.email}</p><div class="msg" dir="ltr">${window._le||""}</div><button class="s" id="lo" style="width:100%">خروج</button></div>`;
   $("#lo").onclick=()=>signOut(auth);
-  $("#ad").onclick=async()=>{try{await setDoc(doc(db,"users",u.uid),{name:u.displayName||u.email,email:(u.email||"").toLowerCase(),role:"admin"});location.reload()}catch(e){const m=$("#er");m.textContent="تعذر الحفظ: "+e.message;m.classList.remove("hide")}};
+}
+function waitView(rej){
+  A.innerHTML=`<div class="card"><h2>${rej?"تم رفض طلبك":"طلبك قيد المراجعة"}</h2><p>${me.name}</p><p dir="ltr">${me.email}</p><p>${rej?"تواصل مع المدير.":"بانتظار موافقة المدير وتحديد بياناتك الوظيفية. لا يمكنك تسجيل الحضور قبل الموافقة."}</p><button id="rl2">تحديث</button> <button class="s" id="o3">خروج</button></div>`;
+  $("#rl2").onclick=()=>location.reload();$("#o3").onclick=()=>signOut(auth);
 }
 
-async function loginView(err=""){err=err||window._err||"";window._err="";
-  let first=location.hash==="#setup";
-  try{first=first||(await getDocs(collection(db,"users"))).empty}catch(e){}
+function loginView(err=""){
+  err=err||window._err||"";window._err="";
   A.innerHTML=`<div class="card"><h2>تسجيل الدخول</h2><label>البريد</label><input id="em" type="email"><label>كلمة المرور</label><input id="pw" type="password">
-  <button id="go" style="width:100%">دخول</button><button class="s" id="gg" style="width:100%;margin-top:8px">الدخول بحساب Google</button><div class="msg ${err?"":"hide"}" id="er">${err}</div>
-  ${first?`<hr><p>لا يوجد مستخدمون بعد.</p><label>اسم المدير</label><input id="nm"><button class="g" id="reg" style="width:100%">إنشاء حساب المدير الأول</button>`:""}</div>`;
+  <button id="go" style="width:100%">دخول</button><button class="s" id="gg" style="width:100%;margin-top:8px">الدخول بحساب Google</button><div class="msg ${err?"":"hide"}" id="er">${err}</div></div>
+  <div class="card"><h3>موظف جديد؟ سجّل حسابك</h3><label>الاسم</label><input id="nm"><label>البريد</label><input id="e2" type="email"><label>كلمة المرور (6 أحرف+)</label><input id="p2" type="password"><button class="g" id="reg" style="width:100%">إنشاء حساب وإرسال الطلب للمدير</button><p class="msg">أو استخدم "الدخول بحساب Google" وسيصل طلبك للمدير أيضاً.</p></div>`;
   const er=m=>{$("#er").textContent=m;$("#er").classList.remove("hide")};
   $("#go").onclick=()=>signInWithEmailAndPassword(auth,$("#em").value,$("#pw").value).catch(()=>er("بيانات الدخول غير صحيحة"));
   $("#gg").onclick=()=>signInWithPopup(auth,new GoogleAuthProvider()).catch(e=>er("تعذر الدخول: "+e.message));
-  if(first)$("#reg").onclick=async()=>{try{
-    const r=await createUserWithEmailAndPassword(auth,$("#em").value,$("#pw").value);
-    await setDoc(doc(db,"users",r.user.uid),{name:$("#nm").value||"المدير",email:$("#em").value,role:"admin"});location.reload()}catch(e){er(e.message)}};
+  $("#reg").onclick=()=>{window._nm=$("#nm").value.trim();createUserWithEmailAndPassword(auth,$("#e2").value,$("#p2").value).catch(e=>er("تعذر إنشاء الحساب: "+e.message))};
 }
 
 const head=t=>`<div class="top"><h2>${t} — ${me.name}</h2><button class="s" id="out">خروج</button></div>`;
@@ -219,7 +217,7 @@ async function report(){
 }
 
 async function employees(){
-  $("#pg").innerHTML=`<div class="card"><h3>إضافة موظف</h3><div class="row"><div><label>الاسم</label><input id="n"></div><div><label>بريد Google للموظف</label><input id="e" type="email"></div></div>
+  $("#pg").innerHTML=`<div class="card"><h3>طلبات الانضمام</h3><div id="pd"></div></div><div class="card"><h3>إضافة موظف</h3><div class="row"><div><label>الاسم</label><input id="n"></div><div><label>بريد Google للموظف</label><input id="e" type="email"></div></div>
   <div class="row"><div><label>الراتب الشهري</label><input id="s" type="number"></div><div><label>ساعات العمل يومياً</label><input id="h" type="number" value="8"></div></div>
   <label>أيام العمل</label><div class="days" id="d">${DAYS.map((x,i)=>`<label><input type="checkbox" value="${i}" ${i<5?"checked":""}>${x}</label>`).join("")}</div><br>
   <button class="g" id="add">إضافة</button><div class="msg hide" id="m"></div></div>
@@ -231,6 +229,16 @@ async function employees(){
     $("#t").innerHTML="<tr><th>الاسم</th><th>البريد</th><th>الراتب</th><th>ساعات/يوم</th><th>أيام</th><th>الحالة</th><th></th></tr>"+rows.map(u=>`<tr><td>${u.name}</td><td>${u.email}</td><td>${u.salary}</td><td>${u.dailyHours}</td><td>${(u.workDays||[]).length}</td><td>${u.k==="users"?"مفعّل":"بانتظار الدخول"}</td><td><button class="r" data-id="${u.id}" data-k="${u.k}" data-em="${u.email}">حذف</button></td></tr>`).join("");
     document.querySelectorAll("#t .r").forEach(b=>b.onclick=async()=>{if(confirm("حذف الموظف؟")){await deleteDoc(doc(db,b.dataset.k,b.dataset.id));await deleteDoc(doc(db,"invites",b.dataset.em)).catch(()=>{});list()}});
   };
+  const pend=async()=>{
+    const ps=(await getDocs(query(collection(db,"users"),where("role","==","pending")))).docs;
+    $("#pd").innerHTML=ps.length?ps.map(x=>{const u=x.data();return `<div class="card" data-id="${x.id}"><b>${u.name}</b> <span dir="ltr">${u.email}</span>
+    <div class="row"><div><label>الراتب الشهري</label><input class="ps" type="number"></div><div><label>ساعات اليوم</label><input class="ph" type="number" value="8"></div></div>
+    <div class="days">${DAYS.map((d,i)=>`<label><input type="checkbox" value="${i}" ${i<5?"checked":""}>${d}</label>`).join("")}</div><br>
+    <button class="g ap">موافقة</button> <button class="r rj">رفض</button></div>`}).join(""):"<p>لا توجد طلبات.</p>";
+    document.querySelectorAll("#pd .ap").forEach(b=>b.onclick=async()=>{const c=b.closest("[data-id]"),sal=+c.querySelector(".ps").value;if(!sal)return alert("اكتب الراتب");
+      await updateDoc(doc(db,"users",c.dataset.id),{role:"employee",salary:sal,dailyHours:+c.querySelector(".ph").value||8,workDays:[...c.querySelectorAll(".days input:checked")].map(x=>+x.value)});pend();list()});
+    document.querySelectorAll("#pd .rj").forEach(b=>b.onclick=async()=>{const c=b.closest("[data-id]");await updateDoc(doc(db,"users",c.dataset.id),{role:"rejected"});pend()});
+  };
   $("#add").onclick=async()=>{
     const m=$("#m");m.classList.remove("hide");m.textContent="جاري الإضافة...";
     try{
@@ -238,7 +246,7 @@ async function employees(){
       m.textContent="تمت الإضافة ✔ يدخل الموظف بحساب Google بنفس البريد";list();
     }catch(e){m.textContent="خطأ: "+e.message}
   };
-  list();
+  list();pend();
 }
 
 function settings(){

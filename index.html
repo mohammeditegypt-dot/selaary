@@ -35,7 +35,7 @@ import {getFirestore,doc,getDoc,setDoc,getDocs,collection,query,where,deleteDoc}
 const firebaseConfig={apiKey:"AIzaSyAMQz6Kh3s1imoL89S8h7xqFlG6d9chHUo",authDomain:"sellary-c5285.firebaseapp.com",projectId:"sellary-c5285",storageBucket:"sellary-c5285.firebasestorage.app",messagingSenderId:"158176823054",appId:"1:158176823054:web:1c4e599f6ccbea2580795f"};
 /* =========================================== */
 
-const app=initializeApp(firebaseConfig),auth=getAuth(app),db=getFirestore(app);
+const app=initializeApp(firebaseConfig),auth=getAuth(app),db=getFirestore(app,"database");
 const $=s=>document.querySelector(s),A=$("#app");
 const DAYS=["الأحد","الاثنين","الثلاثاء","الأربعاء","الخميس","الجمعة","السبت"];
 let me=null,cfg={lat:0,lng:0,radius:150,ot:1.5,ded:1,absent:1};

@@ -28,7 +28,7 @@ button.g{background:var(--ok)}button.r{background:var(--bad)}button.s{background
 
 <script type="module">
 import {initializeApp} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-import {getAuth,signInWithEmailAndPassword,createUserWithEmailAndPassword,signOut,onAuthStateChanged} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import {getAuth,signInWithEmailAndPassword,createUserWithEmailAndPassword,signOut,onAuthStateChanged,GoogleAuthProvider,signInWithPopup} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {getFirestore,doc,getDoc,setDoc,getDocs,collection,query,where,deleteDoc} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 /* ====== ضع إعدادات مشروع Firebase هنا ====== */
@@ -47,21 +47,31 @@ const pos=()=>new Promise((ok,no)=>navigator.geolocation?navigator.geolocation.g
 
 onAuthStateChanged(auth,async u=>{
   if(!u){me=null;return loginView()}
-  const s=await getDoc(doc(db,"users",u.uid));
-  if(!s.exists()){return loginView("الحساب غير مسجل كموظف")}
+  let s=await getDoc(doc(db,"users",u.uid));
+  if(!s.exists()){
+    const em=(u.email||"").toLowerCase();
+    try{
+      const iv=await getDoc(doc(db,"invites",em));
+      if(iv.exists())await setDoc(doc(db,"users",u.uid),{...iv.data(),email:em,role:"employee"});
+      else if(location.hash==="#setup")await setDoc(doc(db,"users",u.uid),{name:u.displayName||em,email:em,role:"admin"});
+    }catch(e){}
+    s=await getDoc(doc(db,"users",u.uid));
+    if(!s.exists()){window._err="هذا البريد غير مسجل في النظام. اطلب من المدير إضافتك";return signOut(auth)}
+  }
   me={uid:u.uid,...s.data()};
   const c=await getDoc(doc(db,"settings","work"));if(c.exists())cfg={...cfg,...c.data()};
   me.role==="admin"?adminView():empView();
 });
 
-async function loginView(err=""){
+async function loginView(err=""){err=err||window._err||"";window._err="";
   let first=location.hash==="#setup";
   try{first=first||(await getDocs(collection(db,"users"))).empty}catch(e){}
   A.innerHTML=`<div class="card"><h2>تسجيل الدخول</h2><label>البريد</label><input id="em" type="email"><label>كلمة المرور</label><input id="pw" type="password">
-  <button id="go" style="width:100%">دخول</button><div class="msg ${err?"":"hide"}" id="er">${err}</div>
+  <button id="go" style="width:100%">دخول</button><button class="s" id="gg" style="width:100%;margin-top:8px">الدخول بحساب Google</button><div class="msg ${err?"":"hide"}" id="er">${err}</div>
   ${first?`<hr><p>لا يوجد مستخدمون بعد.</p><label>اسم المدير</label><input id="nm"><button class="g" id="reg" style="width:100%">إنشاء حساب المدير الأول</button>`:""}</div>`;
   const er=m=>{$("#er").textContent=m;$("#er").classList.remove("hide")};
   $("#go").onclick=()=>signInWithEmailAndPassword(auth,$("#em").value,$("#pw").value).catch(()=>er("بيانات الدخول غير صحيحة"));
+  $("#gg").onclick=()=>signInWithPopup(auth,new GoogleAuthProvider()).catch(e=>er("تعذر الدخول: "+e.message));
   if(first)$("#reg").onclick=async()=>{try{
     const r=await createUserWithEmailAndPassword(auth,$("#em").value,$("#pw").value);
     await setDoc(doc(db,"users",r.user.uid),{name:$("#nm").value||"المدير",email:$("#em").value,role:"admin"});location.reload()}catch(e){er(e.message)}};
@@ -137,22 +147,23 @@ async function report(){
 }
 
 async function employees(){
-  $("#pg").innerHTML=`<div class="card"><h3>إضافة موظف</h3><div class="row"><div><label>الاسم</label><input id="n"></div><div><label>البريد</label><input id="e" type="email"></div><div><label>كلمة المرور (6+)</label><input id="p" type="text"></div></div>
+  $("#pg").innerHTML=`<div class="card"><h3>إضافة موظف</h3><div class="row"><div><label>الاسم</label><input id="n"></div><div><label>بريد Google للموظف</label><input id="e" type="email"></div></div>
   <div class="row"><div><label>الراتب الشهري</label><input id="s" type="number"></div><div><label>ساعات العمل يومياً</label><input id="h" type="number" value="8"></div></div>
   <label>أيام العمل</label><div class="days" id="d">${DAYS.map((x,i)=>`<label><input type="checkbox" value="${i}" ${i<5?"checked":""}>${x}</label>`).join("")}</div><br>
   <button class="g" id="add">إضافة</button><div class="msg hide" id="m"></div></div>
   <div class="card"><div class="tw"><table id="t"></table></div></div>`;
   const list=async()=>{
     const us=(await getDocs(collection(db,"users"))).docs.map(x=>({id:x.id,...x.data()})).filter(u=>u.role==="employee");
-    $("#t").innerHTML="<tr><th>الاسم</th><th>البريد</th><th>الراتب</th><th>ساعات/يوم</th><th>أيام</th><th></th></tr>"+us.map(u=>`<tr><td>${u.name}</td><td>${u.email}</td><td>${u.salary}</td><td>${u.dailyHours}</td><td>${(u.workDays||[]).length}</td><td><button class="r" data-id="${u.id}">حذف</button></td></tr>`).join("");
-    document.querySelectorAll("#t .r").forEach(b=>b.onclick=async()=>{if(confirm("حذف الموظف من النظام؟")){await deleteDoc(doc(db,"users",b.dataset.id));list()}});
+    const iv=(await getDocs(collection(db,"invites"))).docs.map(x=>({id:x.id,...x.data(),email:x.id}));
+    const rows=[...us.map(u=>({...u,k:"users"})),...iv.filter(i=>!us.some(u=>u.email===i.email)).map(i=>({...i,k:"invites"}))];
+    $("#t").innerHTML="<tr><th>الاسم</th><th>البريد</th><th>الراتب</th><th>ساعات/يوم</th><th>أيام</th><th>الحالة</th><th></th></tr>"+rows.map(u=>`<tr><td>${u.name}</td><td>${u.email}</td><td>${u.salary}</td><td>${u.dailyHours}</td><td>${(u.workDays||[]).length}</td><td>${u.k==="users"?"مفعّل":"بانتظار الدخول"}</td><td><button class="r" data-id="${u.id}" data-k="${u.k}" data-em="${u.email}">حذف</button></td></tr>`).join("");
+    document.querySelectorAll("#t .r").forEach(b=>b.onclick=async()=>{if(confirm("حذف الموظف؟")){await deleteDoc(doc(db,b.dataset.k,b.dataset.id));await deleteDoc(doc(db,"invites",b.dataset.em)).catch(()=>{});list()}});
   };
   $("#add").onclick=async()=>{
     const m=$("#m");m.classList.remove("hide");m.textContent="جاري الإضافة...";
     try{
-      const sec=initializeApp(firebaseConfig,"sec"+Date.now()),r=await createUserWithEmailAndPassword(getAuth(sec),$("#e").value,$("#p").value);
-      await setDoc(doc(db,"users",r.user.uid),{name:$("#n").value,email:$("#e").value,role:"employee",salary:+$("#s").value,dailyHours:+$("#h").value,workDays:[...document.querySelectorAll("#d input:checked")].map(x=>+x.value)});
-      m.textContent="تمت الإضافة ✔";list();
+      await setDoc(doc(db,"invites",$("#e").value.trim().toLowerCase()),{name:$("#n").value,salary:+$("#s").value,dailyHours:+$("#h").value,workDays:[...document.querySelectorAll("#d input:checked")].map(x=>+x.value)});
+      m.textContent="تمت الإضافة ✔ يدخل الموظف بحساب Google بنفس البريد";list();
     }catch(e){m.textContent="خطأ: "+e.message}
   };
   list();

@@ -28,8 +28,8 @@ button.g{background:var(--ok)}button.r{background:var(--bad)}button.s{background
 
 <script type="module">
 import {initializeApp} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-import {getAuth,signInWithEmailAndPassword,createUserWithEmailAndPassword,signOut,onAuthStateChanged,GoogleAuthProvider,signInWithPopup} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-import {getFirestore,doc,getDoc,setDoc,getDocs,collection,query,where,deleteDoc} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import {getAuth,signInWithEmailAndPassword,createUserWithEmailAndPassword,signOut,onAuthStateChanged,GoogleAuthProvider,signInWithPopup,EmailAuthProvider,linkWithCredential} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import {getFirestore,doc,getDoc,setDoc,getDocs,collection,query,where,deleteDoc,serverTimestamp,updateDoc} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 /* ====== ضع إعدادات مشروع Firebase هنا ====== */
 const firebaseConfig={apiKey:"AIzaSyAMQz6Kh3s1imoL89S8h7xqFlG6d9chHUo",authDomain:"sellary-c5285.firebaseapp.com",projectId:"sellary-c5285",storageBucket:"sellary-c5285.firebasestorage.app",messagingSenderId:"158176823054",appId:"1:158176823054:web:1c4e599f6ccbea2580795f"};
@@ -42,6 +42,7 @@ const $=s=>document.querySelector(s),A=$("#app");
 const DAYS=["الأحد","الاثنين","الثلاثاء","الأربعاء","الخميس","الجمعة","السبت"];
 let me=null,cfg={lat:0,lng:0,radius:150,ot:1.5,ded:1,absent:1};
 const dk=d=>{d=new Date(d);return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0")};
+const T=v=>v&&v.toMillis?v.toMillis():v,nz=r=>({...r,in:T(r.in),out:T(r.out)});
 const tm=t=>t?new Date(t).toLocaleTimeString("ar-EG",{hour:"2-digit",minute:"2-digit"}):"-";
 const f2=n=>(Math.round(n*100)/100).toLocaleString("en");
 const dist=(a,b,c,d)=>{const R=6371000,r=x=>x*Math.PI/180,dl=r(c-a),dn=r(d-b);const h=Math.sin(dl/2)**2+Math.cos(r(a))*Math.cos(r(c))*Math.sin(dn/2)**2;return 2*R*Math.asin(Math.sqrt(h))};
@@ -94,17 +95,24 @@ async function empView(){
   A.innerHTML=head("الحضور")+`<div class="card"><div id="st" class="msg"></div>
   <button class="big g" id="in">🟢 حضور (صباحاً)</button><button class="big r" id="ou">🔴 انصراف (مغادرة)</button><div id="m" class="msg hide"></div></div>
   <div class="card"><h3>هذا الأسبوع</h3><div class="stat" id="wk">-</div></div>
-  <div class="card"><h3>سجل الشهر</h3><div class="tw"><table id="tb"></table></div></div>`;
+  <div class="card"><h3>سجل الشهر</h3><div class="tw"><table id="tb"></table></div></div>
+  <div class="card"><h3>طلب إجازة / تصحيح حضور</h3><label>النوع</label><select id="rty"><option value="leave">إجازة</option><option value="fix">تصحيح حضور (نسيت التسجيل)</option></select>
+  <div class="row"><div><label>التاريخ / من</label><input type="date" id="rd"></div><div><label>إلى (للإجازة)</label><input type="date" id="rt2"></div></div>
+  <div class="row hide" id="fx"><div><label>وقت الحضور</label><input type="time" id="fi"></div><div><label>وقت الانصراف</label><input type="time" id="fo"></div></div>
+  <label>ملاحظة</label><input id="rn"><button id="rs">إرسال الطلب</button><div class="msg hide" id="rm"></div><div class="tw"><table id="rl"></table></div></div>
+  <div class="card"><h3>كلمة مرور للدخول بالبريد</h3><label>كلمة المرور (6 أحرف+)</label><input id="np" type="password"><button id="sp">حفظ</button><div class="msg hide" id="pm"></div></div>`;
   bindOut();
+  $("#sp").onclick=async()=>{const pm=$("#pm");pm.classList.remove("hide");try{await linkWithCredential(auth.currentUser,EmailAuthProvider.credential(auth.currentUser.email,$("#np").value));pm.textContent="تم ✔ يمكنك الآن الدخول بالبريد وكلمة المرور"}catch(e){pm.textContent=e.code==="auth/provider-already-linked"?"لديك كلمة مرور بالفعل":"خطأ: "+e.message}};
+  reqUI();
   const msg=(t,bad)=>{const m=$("#m");m.textContent=t;m.style.color=bad?"var(--bad)":"var(--ok)";m.classList.remove("hide")};
   const today=()=>doc(db,"attendance",me.uid+"_"+dk(Date.now()));
   async function refresh(){
-    const s=await getDoc(today()),d=s.exists()?s.data():null;
+    const s=await getDoc(today()),d=s.exists()?nz(s.data()):null;
     $("#st").textContent=!d?"لم تسجل حضور اليوم":d.out?`حضور ${tm(d.in)} — انصراف ${tm(d.out)}`:`حضور منذ ${tm(d.in)}`;
     $("#in").disabled=!!d;$("#ou").disabled=!d||!!d.out;
     const now=new Date(),m0=dk(new Date(now.getFullYear(),now.getMonth(),1));
     const q=await getDocs(query(collection(db,"attendance"),where("uid","==",me.uid),where("date",">=",m0)));
-    const rows=q.docs.map(x=>x.data()).sort((a,b)=>b.date.localeCompare(a.date));
+    const rows=q.docs.map(x=>nz(x.data())).sort((a,b)=>b.date.localeCompare(a.date));
     const ws=new Date(now);ws.setDate(now.getDate()-((now.getDay()+1)%7));const wk=dk(ws);
     let h=0;rows.forEach(r=>{if(r.date>=wk&&r.out)h+=(r.out-r.in)/36e5});
     $("#wk").textContent=f2(h)+" ساعة";
@@ -116,8 +124,8 @@ async function empView(){
       const p=await pos(),d=dist(p.coords.latitude,p.coords.longitude,cfg.lat,cfg.lng);
       if(d>cfg.radius)return msg(`أنت بعيد عن مقر العمل (${Math.round(d)} م). المسموح ${cfg.radius} م`,true);
       const ref=today(),s=await getDoc(ref),loc={lat:p.coords.latitude,lng:p.coords.longitude};
-      if(type==="in")await setDoc(ref,{uid:me.uid,date:dk(Date.now()),in:Date.now(),inLoc:loc});
-      else await setDoc(ref,{...s.data(),out:Date.now(),outLoc:loc});
+      if(type==="in")await setDoc(ref,{uid:me.uid,date:dk(Date.now()),in:serverTimestamp(),inLoc:loc});
+      else await updateDoc(ref,{out:serverTimestamp(),outLoc:loc});
       msg("تم التسجيل ✔");refresh();
     }catch(e){msg(e.code===1?"تم رفض إذن الموقع. اسمح للموقع من إعدادات المتصفح ثم أعد المحاولة":e.code===2?"الموقع غير متاح. فعّل GPS":e.code===3?"انتهت مهلة تحديد الموقع. أعد المحاولة":"خطأ: "+(e.message||e),true)}
   }
@@ -126,19 +134,73 @@ async function empView(){
 
 /* ================= المدير ================= */
 function adminView(){
-  A.innerHTML=head("لوحة المدير")+`<div class="tabs"><button data-t="rp" class="on">التقارير والرواتب</button><button data-t="em">الموظفون</button><button data-t="cf">الإعدادات</button></div><div id="pg"></div>`;
+  A.innerHTML=head("لوحة المدير")+`<div class="tabs"><button data-t="db" class="on">لوحة اليوم</button><button data-t="rp">التقارير والرواتب</button><button data-t="rq">الطلبات</button><button data-t="em">الموظفون</button><button data-t="cf">الإعدادات</button></div><div id="pg"></div>`;
   bindOut();
-  const tabs=document.querySelectorAll(".tabs button"),go=t=>{tabs.forEach(b=>b.classList.toggle("on",b.dataset.t===t));({rp:report,em:employees,cf:settings})[t]()};
-  tabs.forEach(b=>b.onclick=()=>go(b.dataset.t));go("rp");
+  const tabs=document.querySelectorAll(".tabs button"),go=t=>{tabs.forEach(b=>b.classList.toggle("on",b.dataset.t===t));({db:dash,rq:reqs,rp:report,em:employees,cf:settings})[t]()};
+  tabs.forEach(b=>b.onclick=()=>go(b.dataset.t));go("db");
+}
+
+async function leaves(){const o={};(await getDocs(query(collection(db,"requests"),where("status","==","approved")))).docs.forEach(x=>{const r=x.data();if(r.type==="leave"){o[r.uid]=o[r.uid]||new Set();(r.days||[]).forEach(d=>o[r.uid].add(d))}});return o}
+
+function reqUI(){
+  const ty=$("#rty"),sh=()=>$("#fx").classList.toggle("hide",ty.value!=="fix");ty.onchange=sh;sh();
+  const ld=async()=>{const q=await getDocs(query(collection(db,"requests"),where("uid","==",me.uid)));
+    $("#rl").innerHTML="<tr><th>النوع</th><th>التاريخ</th><th>الحالة</th></tr>"+q.docs.map(x=>x.data()).sort((a,b)=>b.created-a.created).map(r=>`<tr><td>${r.type==="leave"?"إجازة":"تصحيح حضور"}</td><td>${r.date}${r.to&&r.to!==r.date?" → "+r.to:""}</td><td>${{pending:"قيد المراجعة",approved:"مقبول",rejected:"مرفوض"}[r.status]}</td></tr>`).join("")};
+  $("#rs").onclick=async()=>{const m=$("#rm");m.classList.remove("hide");
+    const d=$("#rd").value,t=$("#rt2").value||d;if(!d)return m.textContent="اختر التاريخ";
+    const r={uid:me.uid,name:me.name,type:ty.value,date:d,to:t,note:$("#rn").value,status:"pending",created:Date.now()};
+    if(r.type==="leave"){r.days=[];for(let x=new Date(d+"T00:00");dk(x)<=t&&r.days.length<60;x.setDate(x.getDate()+1))r.days.push(dk(x))}
+    else{r.fixIn=$("#fi").value;r.fixOut=$("#fo").value;if(!r.fixIn||!r.fixOut)return m.textContent="حدد وقت الحضور والانصراف"}
+    try{await setDoc(doc(collection(db,"requests")),r);m.textContent="تم إرسال الطلب ✔";ld()}catch(e){m.textContent="خطأ: "+e.message}};
+  ld();
+}
+
+async function reqs(){
+  $("#pg").innerHTML=`<div class="card"><h3>الطلبات المعلقة</h3><div class="tw"><table id="rq"></table></div></div>`;
+  const ld=async()=>{
+    const q=(await getDocs(query(collection(db,"requests"),where("status","==","pending")))).docs;
+    $("#rq").innerHTML="<tr><th>الموظف</th><th>النوع</th><th>التاريخ</th><th>تفاصيل</th><th></th></tr>"+q.map(x=>{const r=x.data();return `<tr><td>${r.name}</td><td>${r.type==="leave"?"إجازة":"تصحيح"}</td><td>${r.date}${r.to&&r.to!==r.date?" → "+r.to:""}</td><td>${r.type==="fix"?r.fixIn+" - "+r.fixOut+" ":""}${r.note||""}</td><td><button class="g" data-i="${x.id}" data-a="approved">قبول</button> <button class="r" data-i="${x.id}" data-a="rejected">رفض</button></td></tr>`}).join("");
+    document.querySelectorAll("#rq button").forEach(b=>b.onclick=async()=>{
+      const x=q.find(y=>y.id===b.dataset.i),r=x.data();
+      if(b.dataset.a==="approved"&&r.type==="fix")await setDoc(doc(db,"attendance",r.uid+"_"+r.date),{uid:r.uid,date:r.date,in:new Date(r.date+"T"+r.fixIn).getTime(),out:new Date(r.date+"T"+r.fixOut).getTime(),fixed:true});
+      await updateDoc(doc(db,"requests",x.id),{status:b.dataset.a});ld()});
+  };ld();
+}
+
+async function dash(){
+  $("#pg").innerHTML=`<div class="row" id="cd"></div><div class="card"><div class="top"><h3>حالة اليوم</h3><button id="rf" class="s">تحديث</button></div><div class="tw"><table id="tt"></table></div></div><div class="card"><h3>تقييم الموظفين هذا الشهر</h3><p class="msg">التقييم = 60% التزام بالحضور + 40% استيفاء ساعات العمل (حتى أمس)</p><div class="tw"><table id="rk"></table></div></div>`;
+  async function run(){
+    const n=new Date(),td=dk(n),y=n.getFullYear(),m=n.getMonth(),m0=dk(new Date(y,m,1));
+    const us=(await getDocs(collection(db,"users"))).docs.map(x=>({id:x.id,...x.data()})).filter(u=>u.role==="employee");
+    const at=(await getDocs(query(collection(db,"attendance"),where("date",">=",m0)))).docs.map(x=>nz(x.data()));const lv=await leaves();
+    let pr=0,dn=0,wt=0,off=0,rows="";
+    us.forEach(u=>{
+      const r=at.find(x=>x.uid===u.id&&x.date===td),wd=(u.workDays||[0,1,2,3,4]).includes(n.getDay());let st;
+      if(r&&!r.out){pr++;st="🟢 حاضر الآن"}else if(r){dn++;st="⚪ انصرف"}else if(lv[u.id]&&lv[u.id].has(td)){off++;st="🔵 في إجازة"}else if(wd){wt++;st="🟡 لم يحضر بعد"}else{off++;st="🔵 إجازة"}
+      rows+=`<tr><td>${u.name}</td><td>${st}</td><td>${r?tm(r.in):"-"}</td><td>${r&&r.out?tm(r.out):"-"}</td></tr>`;
+    });
+    $("#cd").innerHTML=[["الموظفون",us.length],["حاضرون الآن",pr],["انصرفوا",dn],["لم يحضروا بعد",wt],["إجازة اليوم",off]].map(c=>`<div class="card"><label>${c[0]}</label><div class="stat">${c[1]}</div></div>`).join("");
+    $("#tt").innerHTML="<tr><th>الموظف</th><th>الحالة</th><th>حضور</th><th>انصراف</th></tr>"+rows;
+    const past=[];for(let d=1;d<n.getDate();d++)past.push(new Date(y,m,d));
+    const rk=us.map(u=>{
+      const wd=u.workDays||[0,1,2,3,4],dh=+u.dailyHours||8,exp=past.filter(d=>wd.includes(d.getDay())).map(dk).filter(x=>!(lv[u.id]&&lv[u.id].has(x)));
+      const mine=at.filter(x=>x.uid===u.id&&x.out&&x.date<td),att=mine.filter(x=>exp.includes(x.date)).length,hrs=mine.reduce((a,x)=>a+(x.out-x.in)/36e5,0);
+      const sc=exp.length?Math.round(Math.min(att/exp.length,1)*60+Math.min(hrs/(exp.length*dh),1)*40):null;
+      return {u,att,ab:Math.max(exp.length-att,0),hrs,sc};
+    }).sort((a,b)=>(b.sc===null?-1:b.sc)-(a.sc===null?-1:a.sc));
+    const lb=x=>x===null?"-":x>=90?"⭐ ممتاز":x>=75?"جيد جداً":x>=60?"جيد":"ضعيف";
+    $("#rk").innerHTML="<tr><th>الموظف</th><th>أيام حضور</th><th>غياب</th><th>ساعات</th><th>التقييم</th><th>الحكم</th></tr>"+rk.map(r=>`<tr><td>${r.u.name}</td><td>${r.att}</td><td>${r.ab}</td><td>${f2(r.hrs)}</td><td>${r.sc===null?"-":r.sc+"%"}</td><td>${lb(r.sc)}</td></tr>`).join("");
+  }
+  $("#rf").onclick=run;run();
 }
 
 async function report(){
   const n=new Date(),mv=n.getFullYear()+"-"+String(n.getMonth()+1).padStart(2,"0");
-  $("#pg").innerHTML=`<div class="card"><label>الشهر</label><input type="month" id="mo" value="${mv}"><button id="run">عرض</button></div><div class="card"><div class="tw"><table id="rt"></table></div></div>`;
+  $("#pg").innerHTML=`<div class="card"><label>الشهر</label><input type="month" id="mo" value="${mv}"><button id="run">عرض</button> <button class="s" id="ex">تصدير Excel</button></div><div class="card"><div class="tw"><table id="rt"></table></div></div>`;
   async function run(){
     const [y,m]=$("#mo").value.split("-").map(Number),a=dk(new Date(y,m-1,1)),b=dk(new Date(y,m,0));
     const us=(await getDocs(collection(db,"users"))).docs.map(x=>({id:x.id,...x.data()})).filter(u=>u.role==="employee");
-    const at=(await getDocs(query(collection(db,"attendance"),where("date",">=",a),where("date","<=",b)))).docs.map(x=>x.data());
+    const at=(await getDocs(query(collection(db,"attendance"),where("date",">=",a),where("date","<=",b)))).docs.map(x=>nz(x.data()));const lv=await leaves();
     const last=Math.min(new Date(y,m,0).getDate(),(y===n.getFullYear()&&m===n.getMonth()+1)?n.getDate()-1:99);
     let h="<tr><th>الموظف</th><th>أيام حضور</th><th>غياب</th><th>ساعات</th><th>إضافي</th><th>نقص</th><th>الأساسي</th><th>+إضافي</th><th>-خصم</th><th>الصافي</th></tr>";
     us.forEach(u=>{
@@ -146,13 +208,14 @@ async function report(){
       const rate=sal/(wd.length*dh*4.33),mine=at.filter(r=>r.uid===u.id&&r.out);
       let tot=0,ot=0,sh=0;mine.forEach(r=>{const x=(r.out-r.in)/36e5;tot+=x;x>dh?ot+=x-dh:sh+=dh-x});
       const have=new Set(at.filter(r=>r.uid===u.id).map(r=>r.date));let ab=0;
-      for(let d=1;d<=last;d++){const dt=new Date(y,m-1,d);if(wd.includes(dt.getDay())&&!have.has(dk(dt)))ab++}
+      for(let d=1;d<=last;d++){const dt=new Date(y,m-1,d);if(wd.includes(dt.getDay())&&!have.has(dk(dt))&&!(lv[u.id]&&lv[u.id].has(dk(dt))))ab++}
       const add=ot*rate*cfg.ot,ded=sh*rate*cfg.ded+ab*dh*rate*cfg.absent,net=sal+add-ded;
       h+=`<tr><td>${u.name}</td><td>${mine.length}</td><td>${ab}</td><td>${f2(tot)}</td><td>${f2(ot)}</td><td>${f2(sh)}</td><td>${f2(sal)}</td><td>${f2(add)}</td><td>${f2(ded)}</td><td><b>${f2(Math.max(net,0))}</b></td></tr>`;
     });
     $("#rt").innerHTML=h;
   }
   $("#run").onclick=run;run();
+  $("#ex").onclick=()=>{const rows=[...document.querySelectorAll("#rt tr")].map(tr=>[...tr.children].map(c=>'"'+c.textContent.replace(/"/g,'""')+'"').join(","));const a=document.createElement("a");a.href=URL.createObjectURL(new Blob(["\ufeff"+rows.join("\n")],{type:"text/csv;charset=utf-8"}));a.download="salaries-"+$("#mo").value+".csv";a.click()};
 }
 
 async function employees(){

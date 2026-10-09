@@ -35,7 +35,9 @@ import {getFirestore,doc,getDoc,setDoc,getDocs,collection,query,where,deleteDoc}
 const firebaseConfig={apiKey:"AIzaSyAMQz6Kh3s1imoL89S8h7xqFlG6d9chHUo",authDomain:"sellary-c5285.firebaseapp.com",projectId:"sellary-c5285",storageBucket:"sellary-c5285.firebasestorage.app",messagingSenderId:"158176823054",appId:"1:158176823054:web:1c4e599f6ccbea2580795f"};
 /* =========================================== */
 
-const app=initializeApp(firebaseConfig),auth=getAuth(app),db=getFirestore(app,"database");
+/* معرّف قاعدة Firestore: اكتب (default) لو لم تسمِّها باسم آخر */
+const DB_ID="(default)";
+const app=initializeApp(firebaseConfig),auth=getAuth(app),db=getFirestore(app,DB_ID);
 const $=s=>document.querySelector(s),A=$("#app");
 const DAYS=["الأحد","الاثنين","الثلاثاء","الأربعاء","الخميس","الجمعة","السبت"];
 let me=null,cfg={lat:0,lng:0,radius:150,ot:1.5,ded:1,absent:1};
@@ -45,7 +47,8 @@ const f2=n=>(Math.round(n*100)/100).toLocaleString("en");
 const dist=(a,b,c,d)=>{const R=6371000,r=x=>x*Math.PI/180,dl=r(c-a),dn=r(d-b);const h=Math.sin(dl/2)**2+Math.cos(r(a))*Math.cos(r(c))*Math.sin(dn/2)**2;return 2*R*Math.asin(Math.sqrt(h))};
 const pos=()=>new Promise((ok,no)=>navigator.geolocation?navigator.geolocation.getCurrentPosition(ok,no,{enableHighAccuracy:true,timeout:15000}):no(new Error("المتصفح لا يدعم تحديد الموقع")));
 
-onAuthStateChanged(auth,async u=>{
+onAuthStateChanged(auth,u=>start(u).catch(showErr));
+async function start(u){
   if(!u){me=null;return loginView()}
   let s=await getDoc(doc(db,"users",u.uid));
   if(!s.exists()){
@@ -56,12 +59,18 @@ onAuthStateChanged(auth,async u=>{
       else if(location.hash==="#setup")await setDoc(doc(db,"users",u.uid),{name:u.displayName||em,email:em,role:"admin"});
     }catch(e){}
     s=await getDoc(doc(db,"users",u.uid));
-    if(!s.exists()){window._err="هذا البريد غير مسجل في النظام. اطلب من المدير إضافتك";return signOut(auth)}
+    if(!s.exists())return noAccount(u);
   }
   me={uid:u.uid,...s.data()};
   const c=await getDoc(doc(db,"settings","work"));if(c.exists())cfg={...cfg,...c.data()};
   me.role==="admin"?adminView():empView();
-});
+}
+function showErr(e){A.innerHTML=`<div class="card"><h3>حدث خطأ</h3><div class="msg" dir="ltr">${e.message||e}</div><button class="s" id="o2">خروج</button></div>`;$("#o2").onclick=()=>signOut(auth)}
+function noAccount(u){
+  A.innerHTML=`<div class="card"><h2>الحساب غير مسجل</h2><p dir="ltr">${u.email}</p><p>اطلب من المدير إضافة هذا البريد. وإذا كنت صاحب النظام وهذا أول إعداد، سجّل نفسك مديراً.</p><button class="g" id="ad" style="width:100%">تسجيل هذا الحساب كمدير (للإعداد الأول فقط)</button><button class="s" id="lo" style="width:100%;margin-top:8px">خروج</button><div class="msg hide" id="er"></div></div>`;
+  $("#lo").onclick=()=>signOut(auth);
+  $("#ad").onclick=async()=>{try{await setDoc(doc(db,"users",u.uid),{name:u.displayName||u.email,email:(u.email||"").toLowerCase(),role:"admin"});location.reload()}catch(e){const m=$("#er");m.textContent="تعذر الحفظ: "+e.message;m.classList.remove("hide")}};
+}
 
 async function loginView(err=""){err=err||window._err||"";window._err="";
   let first=location.hash==="#setup";

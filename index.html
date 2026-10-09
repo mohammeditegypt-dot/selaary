@@ -58,7 +58,7 @@ async function start(u){
       const iv=await getDoc(doc(db,"invites",em));
       if(iv.exists())await setDoc(doc(db,"users",u.uid),{...iv.data(),email:em,role:"employee"});
       else if(location.hash==="#setup")await setDoc(doc(db,"users",u.uid),{name:u.displayName||em,email:em,role:"admin"});
-    }catch(e){}
+    }catch(e){window._le=e.message}
     s=await getDoc(doc(db,"users",u.uid));
     if(!s.exists())return noAccount(u);
   }
@@ -68,7 +68,7 @@ async function start(u){
 }
 function showErr(e){A.innerHTML=`<div class="card"><h3>حدث خطأ</h3><div class="msg" dir="ltr">${e.message||e}</div><button class="s" id="o2">خروج</button></div>`;$("#o2").onclick=()=>signOut(auth)}
 function noAccount(u){
-  A.innerHTML=`<div class="card"><h2>الحساب غير مسجل</h2><p dir="ltr">${u.email}</p><p>اطلب من المدير إضافة هذا البريد. وإذا كنت صاحب النظام وهذا أول إعداد، سجّل نفسك مديراً.</p><button class="g" id="ad" style="width:100%">تسجيل هذا الحساب كمدير (للإعداد الأول فقط)</button><button class="s" id="lo" style="width:100%;margin-top:8px">خروج</button><div class="msg hide" id="er"></div></div>`;
+  A.innerHTML=`<div class="card"><h2>الحساب غير مسجل</h2><p dir="ltr">${u.email}</p><p>اطلب من المدير إضافة هذا البريد بالضبط في تبويب الموظفون. وإذا كنت صاحب النظام وهذا أول إعداد، سجّل نفسك مديراً.</p><button class="g" id="ad" style="width:100%">تسجيل هذا الحساب كمدير (للإعداد الأول فقط)</button><button class="s" id="lo" style="width:100%;margin-top:8px">خروج</button><div class="msg ${window._le?"":"hide"}" id="er" dir="ltr">${window._le||""}</div></div>`;
   $("#lo").onclick=()=>signOut(auth);
   $("#ad").onclick=async()=>{try{await setDoc(doc(db,"users",u.uid),{name:u.displayName||u.email,email:(u.email||"").toLowerCase(),role:"admin"});location.reload()}catch(e){const m=$("#er");m.textContent="تعذر الحفظ: "+e.message;m.classList.remove("hide")}};
 }
